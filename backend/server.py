@@ -137,17 +137,29 @@ class QueryResponse(BaseModel):
     timings_ms: Dict[str, float]
 
 
+from fastapi.staticfiles import StaticFiles
+
+DIST_DIR = os.path.join(PROJECT_ROOT, "frontend_main", "dist")
+ASSETS_DIR = os.path.join(DIST_DIR, "assets")
 FRONTEND_HTML = os.path.join(PROJECT_ROOT, "frontend", "voice_test.html")
+
+if os.path.exists(ASSETS_DIR):
+    app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 
 # ===========================================================================
-# Web UI Routes
+# Web UI & SPA Routes
 # ===========================================================================
 
 @app.get("/", include_in_schema=False)
+@app.get("/chat", include_in_schema=False)
+@app.get("/eval", include_in_schema=False)
 @app.get("/voice", include_in_schema=False)
 async def serve_voice_ui():
-    """Serves the real-time browser voice testing interface."""
+    """Serves the modern Zatpat.ai React UI (or prototype HTML fallback)."""
+    index_html = os.path.join(DIST_DIR, "index.html")
+    if os.path.exists(index_html):
+        return FileResponse(index_html, media_type="text/html")
     if os.path.exists(FRONTEND_HTML):
         return FileResponse(FRONTEND_HTML, media_type="text/html")
     return {"message": "Zatpat.ai API is running. Visit /docs for Swagger."}
