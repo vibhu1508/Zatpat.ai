@@ -13,7 +13,9 @@ let ok = 0, refused = 0;
 for (const e of entries) {
   const r = ask(e.engQuery);
   if (!r.trace.grounded) refused++;
-  else if (r.english === e.engAnswer) ok++;
+  // Correct means it resolved to the right entry — the reply may legitimately
+  // be a passage sentence rather than the curated answer.
+  else if (r.hits[0]?.entry.id === e.id) ok++;
 }
 console.log(`in-corpus (${entries.length})   answered correctly ${((ok/entries.length)*100).toFixed(1)}%   wrongly refused ${((refused/entries.length)*100).toFixed(1)}%`);
 

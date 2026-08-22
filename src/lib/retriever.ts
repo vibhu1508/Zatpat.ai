@@ -67,6 +67,15 @@ export interface Hit {
   strength: number;
   /** Content terms left after stopwords. Below 2, a query is usually a follow-up. */
   terms: number;
+  /**
+   * How well the query matches this entry's own curated question, normalised.
+   * High means the user asked (more or less) the curated question, so the
+   * curated answer is the right reply. Low means they asked something else
+   * about the same topic, and the answer has to come from a passage.
+   */
+  questionStrength: number;
+  /** How well the query matches the best passage, normalised. */
+  passageStrength: number;
 }
 
 /* ── tokenisation ─────────────────────────────────────────── */
@@ -270,6 +279,19 @@ export class Retriever {
     return top;
   }
 
+  /**
+   * Score arbitrary candidate texts against a query with the index's own IDF.
+   * Used to pick a sentence out of a retrieved passage, so a follow-up can be
+   * answered with something other than the entry's single curated answer.
+   */
+  rank(query: string, candidates: string[]): { text: string; score: number }[] {
+    const terms = [...new Set(tokenize(query))];
+    if (!terms.length) return [];
+    return candidates
+      .map((text) => ({ text, score: this.bm25(terms, field(text), this.avgPassageLen) }))
+      .sort((a, b) => b.score - a.score);
+  }
+
   search(query: string, k = 5): Hit[] {
     const raw = tokenize(query);
     if (!raw.length) return [];
@@ -316,6 +338,8 @@ export class Retriever {
           coverage: found / distinct.length,
           concentration: explained / idfMass,
           strength: score / idfMass,
+          questionStrength: qScore / QUERY_WEIGHT / idfMass,
+          passageStrength: bestP / idfMass,
           terms: distinct.length,
         });
       }

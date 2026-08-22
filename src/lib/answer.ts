@@ -74,6 +74,42 @@ const SHORT_DOMINANCE_FLOOR = 0.4;
 /** How many previous user turns to carry when resolving a follow-up. */
 const HISTORY_TURNS = 2;
 
+/**
+ * A sentence pulled from a passage must beat this to be preferred over the
+ * entry's curated answer. Below it, the curated answer is both more concise and
+ * more likely to be what was asked.
+ */
+const EXTRACT_FLOOR = 6;
+
+/**
+ * Above this, the user essentially asked the entry's own curated question, so
+ * the curated answer is what they want — short, clean, and available in every
+ * language. Below it they asked something else and a passage sentence serves
+ * them better. Without this test, extraction fires on the main path: curated
+ * answers are four words long and lose to thirty-word passage sentences on
+ * BM25 regardless of which actually answers the question.
+ */
+const CURATED_FLOOR = 1.0;
+
+/**
+ * A passage can carry an answer the curated questions never covered. When the
+ * question field matches nothing but a passage matches strongly, answer from
+ * the passage instead of refusing.
+ */
+const PASSAGE_ONLY_FLOOR = 1.8;
+
+/** Sentence length bounds — speech, not a paragraph. */
+const MIN_SENTENCE = 40;
+const MAX_SENTENCE = 320;
+
+/** Split a passage into sentences worth speaking. */
+function sentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= MIN_SENTENCE && s.length <= MAX_SENTENCE);
+}
+
 const REFUSALS: Record<string, string> = {
   en: "That is not in the indexed corpus, so I am not going to answer it from memory. Ask me one of the sixty questions the documents actually cover.",
   hi: 'यह जानकारी अनुक्रमित संग्रह में नहीं है, इसलिए मैं अनुमान नहीं लगाऊँगा।',
@@ -179,7 +215,7 @@ export class AnswerEngine {
     const dominance = best ? (best.score - (hits[1]?.score ?? 0)) / best.score : 0;
     const grounded =
       !!best &&
-      best.strength >= floor &&
+      (best.strength >= floor || best.passageStrength >= PASSAGE_ONLY_FLOOR) &&
       (best.terms >= MIN_TERMS || dominance >= SHORT_DOMINANCE_FLOOR);
     const lang = toLang(req.languageCode);
 
@@ -194,10 +230,45 @@ export class AnswerEngine {
     // ── compose ──────────────────────────────────────────────
     t = performance.now();
     const useCorpus = grounded && !blocked;
-    const english = useCorpus ? best.entry.engAnswer : REFUSALS.en;
-    const text = useCorpus
-      ? (lang !== 'en' && best.entry.native[lang]?.answer) || best.entry.engAnswer
-      : (REFUSALS[lang] ?? REFUSALS.en);
+
+    // The curated answer answers the entry's own question. A follow-up asks
+    // something else about the same topic, so returning that answer again is
+    // just the previous reply repeated. Look for a sentence in the retrieved
+    // passages that answers *this* question instead — and it also lets the
+    // system answer things the 1,500 curated questions never covered, since
+    // the passages carry far more than the questions do.
+    let english = REFUSALS.en;
+    let extracted: string | null = null;
+
+    // Did they ask the curated question, or something else about the topic?
+    const askedCurated = !!best && best.questionStrength >= CURATED_FLOOR && !merged;
+
+    if (useCorpus && !askedCurated) {
+      english = best.entry.engAnswer;
+      const pool: string[] = [];
+      for (const h of hits.slice(0, 3)) {
+        for (const p of h.entry.passages) pool.push(...sentences(p.text));
+      }
+      const ranked = this.retriever.rank(req.query, pool);
+      const topSentence = ranked[0];
+      // Only prefer a sentence when it clearly beats the curated answer for
+      // this particular question.
+      const curatedScore = this.retriever.rank(req.query, [best.entry.engAnswer])[0]?.score ?? 0;
+      if (topSentence && topSentence.score >= EXTRACT_FLOOR && topSentence.score > curatedScore) {
+        extracted = topSentence.text;
+        english = topSentence.text;
+      }
+    } else if (useCorpus) {
+      english = best.entry.engAnswer;
+    }
+
+    // Curated answers exist in every language; extracted sentences are English
+    // only, because the browser corpus carries English passages alone.
+    const text = !useCorpus
+      ? (REFUSALS[lang] ?? REFUSALS.en)
+      : extracted
+        ? extracted
+        : (lang !== 'en' && best.entry.native[lang]?.answer) || best.entry.engAnswer;
     mark('compose', performance.now() - t);
 
     mark('speak', 0);
