@@ -24,7 +24,7 @@ if HF_TOKEN == "your_huggingface_token_here" or not HF_TOKEN:
     HF_TOKEN = None
 
 # Sarvam AI API key for Speech-to-Text (required for voice pipeline)
-SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+SARVAM_API_KEY = (os.getenv("SARVAM_API_KEY") or "").strip("\"'").strip()
 
 
 # ===========================================================================

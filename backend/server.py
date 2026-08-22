@@ -323,6 +323,66 @@ async def query_endpoint(req: QueryRequest):
 
 
 # ===========================================================================
+# Sarvam STT WebSocket Proxy (Production Realtime Gateway)
+# ===========================================================================
+
+@app.websocket("/sarvam/{full_path:path}")
+@app.websocket("/sarvam")
+async def sarvam_realtime_proxy(websocket: WebSocket, full_path: str = "v1/realtime"):
+    """
+    Bi-directional full-duplex proxy between browser clients and Sarvam Realtime STT.
+    Injects the server-side SARVAM_API_KEY securely.
+    """
+    await websocket.accept()
+    query_string = websocket.scope.get("query_string", b"").decode("utf-8")
+    clean_path = full_path.lstrip("/")
+    sarvam_url = f"wss://api.sarvam.ai/{clean_path}"
+    if query_string:
+        sarvam_url = f"{sarvam_url}?{query_string}"
+
+    headers = {
+        "api-subscription-key": SARVAM_API_KEY,
+        "API-SUBSCRIPTION-KEY": SARVAM_API_KEY,
+    }
+
+    try:
+        import websockets as ws_client
+        async with ws_client.connect(sarvam_url, extra_headers=headers) as sarvam_ws:
+            async def client_to_sarvam():
+                try:
+                    while True:
+                        msg = await websocket.receive()
+                        if "text" in msg:
+                            await sarvam_ws.send(msg["text"])
+                        elif "bytes" in msg:
+                            await sarvam_ws.send(msg["bytes"])
+                except Exception:
+                    pass
+
+            async def sarvam_to_client():
+                try:
+                    async for msg in sarvam_ws:
+                        if isinstance(msg, str):
+                            await websocket.send_text(msg)
+                        else:
+                            await websocket.send_bytes(msg)
+                except Exception:
+                    pass
+
+            await asyncio.gather(client_to_sarvam(), sarvam_to_client(), return_exceptions=True)
+    except Exception as e:
+        try:
+            await websocket.send_text(json.dumps({"event": "error", "message": f"Sarvam Gateway Error: {str(e)}"}))
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+# ===========================================================================
 # Full-Duplex WebSocket Endpoint (/ws/chat)
 # ===========================================================================
 
