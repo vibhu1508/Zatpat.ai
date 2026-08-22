@@ -86,14 +86,12 @@ export default function Chat() {
   const phaseRef = useRef<Phase>('idle');
   const railsRef = useRef(rails);
   const langRef = useRef(spokenLang);
-  const messagesRef = useRef<Message[]>([]);
   const submitRef = useRef<(t: string, detectedLang?: string) => void>(() => {});
   const traceRef = useRef<Trace | null>(null);
 
   phaseRef.current = phase;
   railsRef.current = rails;
   langRef.current = spokenLang;
-  messagesRef.current = messages;
 
   // Publish the console's orb rectangle; the shared sphere layer grows into it.
   useEffect(() => {
@@ -150,13 +148,8 @@ export default function Chat() {
       speechEndAt.current && micStartAt.current ? speechEndAt.current - micStartAt.current : 0;
     const transcribeMs = speechEndAt.current ? now - speechEndAt.current : 0;
 
-    // Previous user turns, so a follow-up like "what does it mean" resolves
-    // against what was actually being discussed instead of retrieving noise.
-    const history = messagesRef.current.filter((m) => m.role === 'user').map((m) => m.text);
-
     const { text: answer, lang, trace: t } = eng.answer({
       query: clean,
-      history,
       // Which language to answer in, in order of trust:
       //   1. typed input          -> English, you typed it
       //   2. an explicit choice   -> that language; you know better than the

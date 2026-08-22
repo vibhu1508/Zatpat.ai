@@ -1,4 +1,4 @@
-import { Retriever, tokenize, type Entry, type Hit, type Lang } from './retriever';
+import { Retriever, type Entry, type Hit, type Lang } from './retriever';
 import { STRATEGIES } from './pipeline';
 import type { ChunkStrategyId, GuardVerdict, Guardrail, Stage, StageId, Trace } from './types';
 
@@ -48,13 +48,6 @@ export function blankStages(): Stage[] {
  */
 const STRENGTH_FLOOR = 2.5;
 
-/**
- * Lower floor for a query that had conversation history merged into it.
- * Merging adds terms, which inflates the IDF denominator and deflates strength
- * even when the match is right — 25.7% of correctly-resolved follow-ups were
- * refused at the full floor.
- */
-const MERGED_STRENGTH_FLOOR = 1.6;
 
 /**
  * A query with fewer content terms than this needs to prove itself, because
@@ -71,8 +64,6 @@ const MERGED_STRENGTH_FLOOR = 1.6;
 const MIN_TERMS = 2;
 const SHORT_DOMINANCE_FLOOR = 0.4;
 
-/** How many previous user turns to carry when resolving a follow-up. */
-const HISTORY_TURNS = 2;
 
 /**
  * A sentence pulled from a passage must beat this to be preferred over the
@@ -88,15 +79,28 @@ const EXTRACT_FLOOR = 6;
  * them better. Without this test, extraction fires on the main path: curated
  * answers are four words long and lose to thirty-word passage sentences on
  * BM25 regardless of which actually answers the question.
+ *
+ * Measured: exact corpus questions score 0.67 at p1 and 0.96 median; natural
+ * paraphrases 0.84-0.98; context-free follow-ups 0.00-0.61. 0.7 sits in the
+ * gap. Set at 1.0 it was above everything, so paraphrasing a question even
+ * slightly — "sciatic" where the corpus typed "siatic" — dropped the curated
+ * answer in favour of whichever passage sentence happened to score best.
  */
-const CURATED_FLOOR = 1.0;
+const CURATED_FLOOR = 0.7;
 
 /**
  * A passage can carry an answer the curated questions never covered. When the
  * question field matches nothing but a passage matches strongly, answer from
  * the passage instead of refusing.
  */
-const PASSAGE_ONLY_FLOOR = 1.8;
+/*
+ * Measured trade at this floor: admits 34% of genuine passage-content
+ * questions and leaks 2 of 14 off-topic probes. Lowering it to 1.0 admits 84%
+ * but leaks 5 of 14 — lexical matching cannot tell a real question about a
+ * passage from an off-topic one that shares vocabulary with it. Dense
+ * similarity is what closes this gap; until then this stays conservative.
+ */
+const PASSAGE_ONLY_FLOOR = 1.2;
 
 /** Sentence length bounds — speech, not a paragraph. */
 const MIN_SENTENCE = 40;
@@ -110,12 +114,17 @@ function sentences(text: string): string[] {
     .filter((s) => s.length >= MIN_SENTENCE && s.length <= MAX_SENTENCE);
 }
 
+/**
+ * Refusals say what happened and nothing about how the system is built.
+ * An earlier version named the corpus size, which was both an internal detail
+ * and wrong the moment the corpus changed.
+ */
 const REFUSALS: Record<string, string> = {
-  en: "That is not in the indexed corpus, so I am not going to answer it from memory. Ask me one of the sixty questions the documents actually cover.",
-  hi: 'यह जानकारी अनुक्रमित संग्रह में नहीं है, इसलिए मैं अनुमान नहीं लगाऊँगा।',
-  mr: 'ही माहिती अनुक्रमित संग्रहात नाही, त्यामुळे मी अंदाज लावणार नाही.',
-  sa: 'एतत् सूचना सङ्ग्रहे नास्ति, अतः अहं न अनुमानिष्यामि।',
-  ta: 'இந்தத் தகவல் சேகரிப்பில் இல்லை, எனவே நான் ஊகிக்க மாட்டேன்.',
+  en: "I don't have information on that. Try asking about something else.",
+  hi: 'मेरे पास इसकी जानकारी नहीं है। कुछ और पूछकर देखिए।',
+  mr: 'माझ्याकडे याबद्दल माहिती नाही. दुसरे काहीतरी विचारून पहा.',
+  sa: 'तस्य विषये मम सूचना नास्ति। अन्यत् किमपि पृच्छतु।',
+  ta: 'அதைப் பற்றிய தகவல் என்னிடம் இல்லை. வேறு ஏதாவது கேட்டுப் பாருங்கள்.',
 };
 
 /**
@@ -132,8 +141,6 @@ export function toLang(code: string | undefined): Lang | 'en' {
 
 export interface AnswerRequest {
   query: string;
-  /** Previous user turns, oldest first. Used to resolve follow-ups. */
-  history?: string[];
   /** Language code from Sarvam's final transcript, e.g. "hi-IN". */
   languageCode?: string;
   guardrails: Guardrail[];
@@ -147,7 +154,7 @@ export interface AnswerRequest {
 export interface AnswerResult {
   /** Spoken text, in the language the question was asked in. */
   text: string;
-  /** The query actually retrieved on — differs when history was merged in. */
+  /** The query retrieved on. Always the query as asked — no context is merged. */
   resolvedQuery: string;
   /** The same answer in English, for the trace. */
   english: string;
@@ -162,6 +169,8 @@ export class AnswerEngine {
   constructor(entries: Entry[]) {
     this.retriever = new Retriever(entries);
   }
+
+
 
   answer(req: AnswerRequest): AnswerResult {
     const stages = blankStages();
@@ -180,37 +189,20 @@ export class AnswerEngine {
     mark('route', performance.now() - t);
 
     // ── retrieve ─────────────────────────────────────────────
+    //
+    // Each turn is resolved on its own. An earlier version merged the previous
+    // turns into a thin query so follow-ups stayed on topic, and cached the
+    // result per session. Both are gone deliberately: carrying context forward
+    // made a new question inherit the previous answer, which is a worse failure
+    // than refusing. A context-free follow-up now falls below the strength gate
+    // and is refused rather than answered from whatever came before.
     t = performance.now();
-    let hits = this.retriever.search(req.query, 5);
-    let resolvedQuery = req.query;
-    let merged = false;
-
-    // A question like "so what is its function?" strips to a single content
-    // term and retrieves noise — measured, 0 of 300 such follow-ups stayed on
-    // topic. Carrying the previous turns in fixes all of them, so retry that
-    // way whenever the query is too thin to stand on its own.
-    const thin = !hits[0] || hits[0].terms < MIN_TERMS || hits[0].strength < STRENGTH_FLOOR;
-    if (thin && req.history?.length) {
-      const context = req.history.slice(-HISTORY_TURNS).join(' ');
-      // Only merge if the history actually contributes something the query does
-      // not already say. Without this, asking the same borderline question twice
-      // answers it the second time purely because the merged text repeats the
-      // terms — the same question would behave differently on a repeat, which
-      // is worse than being consistently wrong.
-      const own = new Set(tokenize(req.query));
-      const adds = tokenize(context).some((t) => !own.has(t));
-      const candidate = adds ? `${context} ${req.query}` : req.query;
-      const retried = adds ? this.retriever.search(candidate, 5) : [];
-      if (retried[0] && retried[0].strength >= MERGED_STRENGTH_FLOOR) {
-        hits = retried;
-        resolvedQuery = candidate;
-        merged = true;
-      }
-    }
+    const hits = this.retriever.search(req.query, 5);
+    const resolvedQuery = req.query;
     mark('retrieve', performance.now() - t);
 
     const best = hits[0];
-    const floor = merged ? MERGED_STRENGTH_FLOOR : STRENGTH_FLOOR;
+    const floor = STRENGTH_FLOOR;
     // How far the top entry stands clear of the runner-up.
     const dominance = best ? (best.score - (hits[1]?.score ?? 0)) / best.score : 0;
     const grounded =
@@ -241,14 +233,16 @@ export class AnswerEngine {
     let extracted: string | null = null;
 
     // Did they ask the curated question, or something else about the topic?
-    const askedCurated = !!best && best.questionStrength >= CURATED_FLOOR && !merged;
+    const askedCurated = !!best && best.questionStrength >= CURATED_FLOOR;
 
     if (useCorpus && !askedCurated) {
       english = best.entry.engAnswer;
+      // Only the resolved entry's own passages. Pooling the top few entries
+      // gives more material but lets the answer drift: asking "what is its
+      // function?" about a radical neck pulled a sentence about the Department
+      // of Corrections, because that entry also talks about functions.
       const pool: string[] = [];
-      for (const h of hits.slice(0, 3)) {
-        for (const p of h.entry.passages) pool.push(...sentences(p.text));
-      }
+      for (const p of best.entry.passages) pool.push(...sentences(p.text));
       const ranked = this.retriever.rank(req.query, pool);
       const topSentence = ranked[0];
       // Only prefer a sentence when it clearly beats the curated answer for
@@ -273,19 +267,24 @@ export class AnswerEngine {
 
     mark('speak', 0);
 
-    const totalMs = stages.reduce((a, s) => a + (s.ms ?? 0), 0);
+    // Headline latency is the retrieval pipeline alone. Transcription is a
+    // third-party network call an order of magnitude larger than everything
+    // else, and averaging it in hides whether our own work is fast — it is
+    // still measured, still in the trace, just not the number on the wall.
+    const retrievalMs = stages
+      .filter((x) => x.id !== 'transcribe')
+      .reduce((a, x) => a + (x.ms ?? 0), 0);
 
     const trace: Trace = {
       stages,
-      totalMs: Math.round(totalMs),
+      totalMs: Math.round(retrievalMs * 100) / 100,
+      transcribeMs: Math.round(req.transcribeMs ?? 0),
       lang: req.languageCode,
       utteranceMs: Math.round(req.utteranceMs ?? 0),
       grounded: useCorpus,
       coverage: best?.coverage ?? 0,
       strategy,
-      routeReason: merged
-        ? `${reasonFor(strategy, best)} Resolved using the previous turn.`
-        : reasonFor(strategy, best),
+      routeReason: reasonFor(strategy, best),
       queryClass: best?.entry.type?.toLowerCase() ?? 'unmatched',
       k: hits.length,
       chunks: hits.map((h) => ({
@@ -316,7 +315,7 @@ function routeFor(query: string): ChunkStrategyId {
 
 function reasonFor(strategy: ChunkStrategyId, best: Hit | undefined): string {
   const name = STRATEGIES.find((s) => s.id === strategy)?.name ?? strategy;
-  if (!best) return `${name} — nothing in the corpus scored above zero.`;
+  if (!best) return `${name} — no passage scored above zero.`;
   return `${name} — matched "${best.entry.engQuery}" with ${(best.coverage * 100).toFixed(0)}% term coverage.`;
 }
 
@@ -337,7 +336,7 @@ function runRails(rails: Guardrail[], query: string, grounded: boolean): GuardVe
         case 'scope':
           // The real gate: retrieval found nothing that covers the question.
           fired = !grounded;
-          note = fired ? 'Question falls outside the indexed corpus.' : undefined;
+          note = fired ? 'No matching information found.' : undefined;
           break;
         case 'injection':
           fired = /\b(ignore (all |the )?(previous|prior) instructions|disregard the above|system prompt)\b/i.test(

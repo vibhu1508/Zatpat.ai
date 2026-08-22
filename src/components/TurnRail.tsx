@@ -58,7 +58,7 @@ export default function TurnRail({
               {m.trace && (
                 <div className="turn__foot">
                   <span>
-                    <b>{m.trace.totalMs}</b> ms
+                    <b>{m.trace.totalMs < 10 ? m.trace.totalMs.toFixed(1) : Math.round(m.trace.totalMs)}</b> ms
                   </span>
                   <span>
                     <b>{STRATEGIES.find((s) => s.id === m.trace!.strategy)?.name}</b>

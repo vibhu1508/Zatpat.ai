@@ -40,8 +40,16 @@ export interface SarvamOptions {
 
 export const SAMPLE_RATE = 16000;
 
-/** Same-origin path the Vite dev server proxies, adding the subscription key. */
-const DEFAULT_URL = '/sarvam/speech-to-text-realtime/ws';
+/**
+ * Where to reach the proxy that holds the subscription key.
+ *
+ * Same-origin by default, which is what the Vite dev proxy and a Cloudflare
+ * Pages Function both provide. When the proxy is a separate service — Render
+ * deploys the static site and the proxy as two origins — set
+ * VITE_SARVAM_WS_URL to its base, e.g. wss://host.onrender.com/sarvam.
+ */
+const BASE = import.meta.env.VITE_SARVAM_WS_URL?.replace(/\/$/, '') ?? '/sarvam';
+const DEFAULT_URL = `${BASE}/speech-to-text-realtime/ws`;
 
 type ServerEvent =
   | { event: 'session.begin'; request_id: string; config: unknown }

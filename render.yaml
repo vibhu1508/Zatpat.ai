@@ -1,0 +1,17 @@
+# Render blueprint — the WebSocket proxy only.
+#
+# The frontend is on Vercel. This service exists solely to hold the Sarvam API
+# key, because a browser cannot set headers on a WebSocket handshake.
+services:
+  - type: web
+    name: zatpat-sarvam-proxy
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server/proxy.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: 
+        sync: false   # set in the dashboard; never committed
+      - key: ALLOWED_ORIGINS
+        sync: false   # https://your-app.vercel.app — the proxy is cross-origin

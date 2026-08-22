@@ -18,7 +18,7 @@ console.log(`top hit: "${h?.entry.engQuery}"  strength ${h?.strength.toFixed(2)}
 
 const hist: string[] = [];
 for (let i = 1; i <= 3; i++) {
-  const res = eng.answer({ query: q1, history: [...hist], guardrails: DEFAULT_GUARDRAILS, languageCode: 'en-IN' });
+  const res = eng.answer({ query: q1: [...hist], guardrails: DEFAULT_GUARDRAILS, languageCode: 'en-IN' });
   hist.push(q1);
   console.log(`  turn ${i}: grounded=${res.trace.grounded}  "${res.english.slice(0, 52)}"`);
 }
@@ -28,7 +28,7 @@ const indo = entries.find((e) => /indonesia/i.test(e.engQuery));
 if (indo) {
   console.log(`entry: "${indo.engQuery}"`);
   console.log(`gold answer: "${indo.engAnswer}"`);
-  const res = eng.answer({ query: 'Which country are we talking about?', history: [indo.engQuery], guardrails: DEFAULT_GUARDRAILS, languageCode: 'en-IN' });
+  const res = eng.answer({ query: 'Which country are we talking about?': [indo.engQuery], guardrails: DEFAULT_GUARDRAILS, languageCode: 'en-IN' });
   console.log(`follow-up "Which country are we talking about?" -> "${res.english}"`);
   console.log(`\nbut the passages DO contain the answer:`);
   for (const p of indo.passages.slice(0, 2)) console.log(`  - ${p.text.slice(0, 110)}…`);

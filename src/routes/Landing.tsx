@@ -14,7 +14,7 @@ const LEAVE_MS = 260;
 const PIPELINE = [
   ['01', 'Transcribe', 'saaras:v3-realtime over a WebSocket, mode=translate. Speech in Hindi, Marathi, Tamil or Sanskrit comes back as English text, so no separate translation hop sits between the voice and the index.', 183],
   ['02', 'Route', 'A rule ladder reads the query shape and picks the chunking strategy. The decision is logged, not hidden.', 0.1],
-  ['03', 'Retrieve', 'BM25 over the corpus, scoring each entry on its own question and its best passage. Sixty questions is small enough to search exhaustively.', 0.4],
+  ['03', 'Retrieve', 'BM25 over the indexed passages, scoring each entry on its own question and its best matching passage.', 0.4],
   ['04', 'Guard', 'Input, retrieval and output rails run in one pass. A question the corpus does not cover is refused, not guessed at.', 0.4],
   ['05', 'Compose', 'The answer is looked up, not generated — the corpus ships gold answers in all four languages, so nothing can be invented.', 0.1],
   ['06', 'Speak', 'Sentence-level TTS in the language the question was asked in.', 0],
@@ -275,7 +275,7 @@ export default function Landing() {
             {[
               ['Speech', 'Sarvam saaras:v3-realtime, mode=translate', 'linear16 · 16 kHz mono'],
               ['Languages', 'Hindi, Marathi, Tamil, Sanskrit, English', '20 ms frames'],
-              ['Corpus', '60 questions, 71 passages, gold answers ×4 languages', '136 KB, fetched not bundled'],
+              ['Corpus', 'Indexed passages with gold answers in four languages', 'Fetched, not bundled'],
               ['Retrieval', 'BM25 over question and passage fields', 'k = 5 · 0.4 ms median'],
               ['Answering', 'Looked up from the corpus, not generated', 'Nothing can be invented'],
               ['Memory', 'Per-session turn buffer, no cross-session recall', 'Cleared on close'],

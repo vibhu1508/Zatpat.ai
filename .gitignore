@@ -9,3 +9,10 @@ cache
 .cache
 .evalbuild
 tsconfig.tsbuildinfo
+
+# Cloudflare
+.wrangler
+
+# Python
+__pycache__/
+*.pyc

@@ -16,6 +16,11 @@ npm run dev                   # http://localhost:5173
 npm run eval                  # retrieval accuracy + latency
 ```
 
+## Deploying
+
+Free on Cloudflare Pages — static site and the Sarvam WebSocket proxy in one
+deploy. See [DEPLOY.md](DEPLOY.md).
+
 ## The API key
 
 `SARVAM_API_KEY` is deliberately **not** `VITE_`-prefixed. Sarvam's documented
@@ -106,22 +111,60 @@ follow-up, with history stayed on topic     100.0%
 
 ## Conversation
 
-A follow-up strips to almost nothing after stopword removal, and then retrieves
-noise:
+A follow-up strips to almost nothing after stopword removal and then retrieves
+noise. Measured over 300 simulated two-turn conversations, **0%** stayed on
+topic. Thin queries are now retried with the previous turns prepended, which
+takes that to **100%**.
+
+Two rules keep it honest:
+
+- **History must add something.** Merging only happens when the previous turns
+  contribute terms the query does not already have. Without this, asking the
+  same borderline question twice answers it the second time purely because the
+  merged text repeats itself — the same question behaving differently on a
+  repeat is worse than being consistently wrong.
+- **Extraction stays inside the resolved entry.** Pooling sentences from the
+  top few entries lets answers drift: "what is its function?" about a radical
+  neck returned a sentence about the Department of Corrections.
+
+## Answering beyond the curated questions
+
+The 14,988 passages carry far more than the 1,500 questions ask about. When the
+query is not the entry's own question, the answer is a **sentence extracted
+from that entry's passages** rather than the curated answer:
 
 ```
-"So what is its function? What does it actually mean?"  -> [function]
-   -> "correctional functions" -> answers about prison administration
+probes drawn from non-curated passage content
+  answered from a passage sentence   33.7%    (was 0.7%)
 ```
 
-Measured over 300 simulated two-turn conversations, **0%** of follow-ups stayed
-on topic. [answer.ts](src/lib/answer.ts) now retries thin queries with the
-previous turns prepended, which takes that to **100%**.
+The split is decided by `questionStrength`: exact corpus questions score 0.67
+at p1 and 0.96 median, natural paraphrases 0.84-0.98, context-free follow-ups
+0.00-0.61. The floor sits at 0.7. Curated answers win above it — they are
+concise and exist in every language; extracted sentences are English only.
 
-Single-term queries are not refused outright — 254 of the 1,500 corpus
-questions are genuine one-concept lookups. They are separated by dominance: a
-rare term stands clear of the runner-up (median 1.00), a follow-up remnant like
-"function" does not (median 0.01).
+## Spelling variants
+
+The corpus stores `siatic` where a speaker says `sciatic`, and both spellings
+exist in the vocabulary because different passages use each. Retrieval still
+ranked the right entry first, but the unmatched term dragged confidence under
+the refusal gate. Terms now also match their near-spellings (trigram Jaccard
+> 0.49, discounted 0.85), which took that query from strength 2.16 to 3.06.
+
+Real variants measure 0.50-0.77 (`sciatic~siatic` 0.50, `temperature~temperatur`
+0.77); genuinely different words sit at 0.20-0.50.
+
+## Session cache
+
+The engine keeps a per-session cache of resolved queries and the current topic.
+Retrieval is only ~3 ms, so this is not a latency win here — it is a
+**consistency** win: asking the same thing twice in one conversation must give
+the same answer, and without it history grows between turns and can change what
+a borderline query resolves to. It matters much more once retrieval sits behind
+an embedding model at ~120 ms.
+
+`resetSession()` clears both. The console calls it on **Clear**; any test
+simulating separate conversations must call it too, or topics leak between them.
 
 ## Speech
 

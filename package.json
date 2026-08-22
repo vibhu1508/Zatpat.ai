@@ -14,13 +14,17 @@
     "eval:guard": "./scripts/run-eval.sh scripts/eval-guard.ts",
     "eval:gate": "./scripts/run-eval.sh scripts/eval-gate.ts",
     "eval:multiturn": "./scripts/run-eval.sh scripts/eval-multiturn.ts",
-    "eval:transcript": "./scripts/run-eval.sh scripts/eval-transcript.ts"
+    "eval:transcript": "./scripts/run-eval.sh scripts/eval-transcript.ts",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name zatpat",
+    "preview:cf": "wrangler pages dev dist",
+    "proxy": "node server/proxy.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.2",
-    "three": "^0.177.0"
+    "three": "^0.177.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
@@ -30,7 +34,6 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.5.1",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5",
-    "ws": "^8.21.3"
+    "vite": "^6.3.5"
   }
 }

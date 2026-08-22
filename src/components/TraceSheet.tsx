@@ -15,9 +15,16 @@ export default function TraceSheet({ trace, onClose }: { trace: Trace; onClose: 
       <div className="trace">
         <div className="trace__grid" style={{ marginTop: 0 }}>
           <div>
-            <span className="label">End to end</span>
+            <span className="label">Retrieval</span>
             <span className="v">
-              {trace.totalMs}
+              {trace.totalMs < 10 ? trace.totalMs.toFixed(1) : Math.round(trace.totalMs)}
+              <small style={{ fontSize: 11, color: 'var(--ink-3)' }}> ms</small>
+            </span>
+          </div>
+          <div>
+            <span className="label">Transcribe</span>
+            <span className="v">
+              {trace.transcribeMs}
               <small style={{ fontSize: 11, color: 'var(--ink-3)' }}> ms</small>
             </span>
           </div>

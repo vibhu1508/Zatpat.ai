@@ -1,6 +1,6 @@
 import type { Stage, Trace } from '../lib/types';
 
-/** Target: end of speech to first sound of the answer. */
+/** Target for the retrieval pipeline alone. */
 const BUDGET_MS = 200;
 
 /** Which language the answer came back in — the one thing that silently
@@ -28,7 +28,10 @@ export default function LatencyPanel({
   previousTotal: number | null;
   onOpen: () => void;
 }) {
-  const measured = stages.filter((s) => s.ms != null);
+  // Transcription is excluded from the headline: it is a third-party call an
+  // order of magnitude larger than the rest, and including it makes our own
+  // pipeline unmeasurable.
+  const measured = stages.filter((s) => s.ms != null && s.id !== 'transcribe');
   const running = measured.reduce((a, s) => a + (s.ms ?? 0), 0);
   const total = trace?.totalMs ?? running;
   const peak = Math.max(1, ...measured.map((s) => s.ms ?? 0));
@@ -47,9 +50,9 @@ export default function LatencyPanel({
 
       <div>
         <div className="lat__total">
-          <span className="label">Speech end → answer</span>
+          <span className="label">Retrieval</span>
           <div className="lat__big" style={{ marginTop: 10 }}>
-            {total > 0 ? total.toLocaleString() : <span style={{ color: 'var(--ink-3)' }}>—</span>}
+            {total > 0 ? (total < 10 ? total.toFixed(1) : Math.round(total).toLocaleString()) : <span style={{ color: 'var(--ink-3)' }}>—</span>}
             <small>ms</small>
           </div>
           <div className="lat__delta" data-good={vsBudget == null ? undefined : vsBudget <= 0}>
@@ -86,6 +89,10 @@ export default function LatencyPanel({
       </div>
 
       <div className="lat__foot">
+        <div className="kv">
+          <span className="label">Transcribe</span>
+          <b>{trace?.transcribeMs ? `${trace.transcribeMs} ms` : '—'}</b>
+        </div>
         <div className="kv">
           <span className="label">You spoke for</span>
           <b>{trace?.utteranceMs ? `${(trace.utteranceMs / 1000).toFixed(1)}s` : '—'}</b>

@@ -1,9 +1,9 @@
 /**
  * BM25 retrieval over the ingested corpus.
  *
- * The corpus is small (60 questions, 71 passages), so this runs entirely in the
- * browser in well under a millisecond — retrieval is not where the latency
- * budget goes, which leaves it for transcription and generation.
+ * The index is small enough to run entirely in the browser in a couple of
+ * milliseconds — retrieval is not where the latency budget goes, which leaves
+ * it for transcription and speech.
  *
  * Each entry is scored on two fields: its own English question, and its best
  * matching passage. Matching the question carries more weight — the corpus is a
@@ -109,14 +109,6 @@ function stem(w: string): string {
   return w;
 }
 
-/** Character trigrams of a padded term, for fuzzy lookup. */
-function trigramsOf(term: string): string[] {
-  const s = `  ${term} `;
-  const out: string[] = [];
-  for (let i = 0; i < s.length - 2; i++) out.push(s.slice(i, i + 3));
-  return out;
-}
-
 export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
@@ -156,9 +148,6 @@ function field(text: string): Field {
 export class Retriever {
   private docs: Indexed[] = [];
   private idf = new Map<string, number>();
-  /** Character trigram -> vocabulary terms containing it. */
-  private trigrams = new Map<string, Set<string>>();
-  private variantCache = new Map<string, string[]>();
   private avgQueryLen = 1;
   private avgPassageLen = 1;
   private maxIdf = 1;
@@ -197,86 +186,28 @@ export class Retriever {
     }
     this.maxIdf = Math.max(1, ...this.idf.values());
 
-    // Trigram postings, so a term the corpus does not literally contain can
-    // still find its near-spellings. The corpus is user-authored text and
-    // carries real typos — it stores "siatic" where a speaker says "sciatic",
-    // and exact matching refuses a question it plainly contains.
-    for (const term of this.idf.keys()) {
-      for (const g of trigramsOf(term)) {
-        let set = this.trigrams.get(g);
-        if (!set) this.trigrams.set(g, (set = new Set()));
-        set.add(term);
-      }
-    }
     this.avgQueryLen = qLen / Math.max(1, this.docs.length);
     this.avgPassageLen = pLen / Math.max(1, pCount);
   }
 
-  /** Discount applied when a term matches only through a near-spelling. */
-  private static readonly VARIANT_WEIGHT = 0.85;
-
+  /**
+   * Plain BM25 over the query's terms.
+   *
+   * A near-spelling expansion once lived here, to match a corpus typo
+   * ("siatic" where a speaker says "sciatic"). It worked, and it cost 10-16x
+   * on every single query to rescue a handful — retrieval went from ~1 ms to
+   * ~16 ms. Synonym and spelling robustness belongs in the embedding, not in a
+   * lexical index that is chosen precisely because it is cheap.
+   */
   private bm25(terms: string[], f: Field, avgLen: number): number {
     let score = 0;
     for (const t of terms) {
-      let tf = f.tf.get(t);
-      let idf = this.idf.get(t) ?? 0;
-      let weight = 1;
-
-      if (!tf) {
-        // Fall back to the best near-spelling this field does contain.
-        for (const v of this.variantsOf(t)) {
-          const vtf = f.tf.get(v);
-          if (vtf) {
-            tf = vtf;
-            idf = this.idf.get(v) ?? 0;
-            weight = Retriever.VARIANT_WEIGHT;
-            break;
-          }
-        }
-      }
+      const tf = f.tf.get(t);
       if (!tf) continue;
-      score += weight * ((idf * (tf * (K1 + 1))) / (tf + K1 * (1 - B + (B * f.len) / avgLen)));
+      const idf = this.idf.get(t) ?? 0;
+      score += (idf * (tf * (K1 + 1))) / (tf + K1 * (1 - B + (B * f.len) / avgLen));
     }
     return score;
-  }
-
-  /**
-   * Near-spellings of a term, by trigram Jaccard.
-   *
-   * This has to run for *known* terms too, not just unknown ones. The corpus
-   * carries real typos: it stores "siatic" where a speaker says "sciatic", and
-   * both spellings exist in the vocabulary because other passages use each. So
-   * "sciatic" is never treated as unknown, yet it fails to match the one entry
-   * that answers the question — retrieval still ranks that entry first, but the
-   * unmatched term drags the confidence score under the refusal gate.
-   *
-   * Measured on real variants: sciatic~siatic 0.50, calendar~calender 0.50,
-   * temperature~temperatur 0.77. Genuinely different words sit at 0.20-0.50,
-   * so 0.49 is the boundary. Variants only ever *add* a way to match, and each
-   * is discounted, so a spurious one costs a little noise rather than an answer.
-   */
-  private variantsOf(term: string): string[] {
-    if (term.length < 5) return [];
-    const cached = this.variantCache.get(term);
-    if (cached) return cached;
-
-    const grams = trigramsOf(term);
-    const counts = new Map<string, number>();
-    for (const g of grams) {
-      const set = this.trigrams.get(g);
-      if (!set) continue;
-      for (const cand of set) counts.set(cand, (counts.get(cand) ?? 0) + 1);
-    }
-    const out: string[] = [];
-    for (const [cand, shared] of counts) {
-      if (cand === term) continue;
-      const union = grams.length + trigramsOf(cand).length - shared;
-      if (shared / union > 0.49) out.push(cand);
-    }
-    out.sort((a, b) => (this.idf.get(b) ?? 0) - (this.idf.get(a) ?? 0));
-    const top = out.slice(0, 3);
-    this.variantCache.set(term, top);
-    return top;
   }
 
   /**
@@ -323,11 +254,9 @@ export class Retriever {
         let found = 0;
         let explained = 0;
         for (const t of distinct) {
-          let hitTerm: string | null = d.vocab.has(t) ? t : null;
-          if (!hitTerm) hitTerm = this.variantsOf(t).find((v) => d.vocab.has(v)) ?? null;
-          if (hitTerm) {
+          if (d.vocab.has(t)) {
             found++;
-            explained += this.idf.get(hitTerm) ?? 0;
+            explained += this.idf.get(t) ?? 0;
           }
         }
         hits.push({

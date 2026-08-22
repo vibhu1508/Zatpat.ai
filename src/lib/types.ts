@@ -29,7 +29,10 @@ export interface RetrievedChunk {
 
 export interface Trace {
   stages: Stage[];
+  /** Retrieval pipeline only, excluding transcription. */
   totalMs: number;
+  /** Speech-to-text time. Reported separately — see `totalMs`. */
+  transcribeMs: number;
   /** Language the question was asked in, as reported by Sarvam. */
   lang?: string;
   /**

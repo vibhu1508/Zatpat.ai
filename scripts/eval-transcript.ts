@@ -14,7 +14,7 @@ const turns = [
 
 const history: string[] = [];
 for (const q of turns) {
-  const r = eng.answer({ query: q, history: [...history], guardrails: DEFAULT_GUARDRAILS, languageCode: 'en-IN' });
+  const r = eng.answer({ query: q, guardrails: DEFAULT_GUARDRAILS, languageCode: 'en-IN' });
   history.push(q);
   console.log(`\nQ  "${q}"`);
   if (r.resolvedQuery !== q) console.log(`   resolved as: "${r.resolvedQuery.slice(0, 78)}…"`);
