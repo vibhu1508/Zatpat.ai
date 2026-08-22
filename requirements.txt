@@ -1,25 +1,23 @@
 # =============================================================================
-# Zatpat.ai Production Dependencies (Optimized for <512MB RAM)
+# Zatpat.ai Cloud Production Dependencies (CPU-Only, <80MB RAM)
 # =============================================================================
+--extra-index-url https://download.pytorch.org/whl/cpu
 
-# Dataset & HuggingFace
-huggingface_hub
-requests
-
-# Embeddings (PyTorch CPU / Sentence-Transformers)
+# PyTorch CPU-Only (no heavy NVIDIA CUDA packages)
+torch
 sentence-transformers
 numpy
 
-# Redis Stack client (Vector search + Session memory)
+# Redis Stack client
 redis[hiredis]
-
-# LLM client (Ollama)
-ollama
 
 # Web server & WebSockets
 fastapi
 uvicorn[standard]
 websockets
 
-# Environment & utilities
+# LLM & STT clients
+ollama
+requests
 python-dotenv
+huggingface_hub
