@@ -106,7 +106,9 @@ OLLAMA_TIMEOUT = 10              # Seconds before LLM call times out
 # Mode: Translate (auto-detect language → English text + detected_lang code)
 # Sample rate: 16kHz mono, 16-bit PCM
 
-SARVAM_WS_URL = "wss://api.sarvam.ai/speech-to-text-translate"
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
+SARVAM_WS_URL = os.getenv("SARVAM_WS_URL", "wss://api.sarvam.ai/speech-to-text-translate")
+SARVAM_REST_URL = os.getenv("SARVAM_REST_URL", "https://api.sarvam.ai/speech-to-text-translate")
 SARVAM_MODEL = "saaras:v3-realtime"
 SARVAM_SAMPLE_RATE = 16000
 
@@ -120,6 +122,39 @@ CONFIDENCE_THRESHOLD = 0.45      # Min cosine similarity to proceed with answer
 GROUNDEDNESS_THRESHOLD = 0.30    # Min token overlap ratio (LLM output vs context)
 MAX_QUERY_WORDS = 200            # Reject queries longer than this
 MIN_QUERY_WORDS = 1              # Reject queries shorter than this
+
+# Localized abstention messages when confidence is too low or question is out-of-domain
+ABSTAIN_MESSAGES = {
+    "hi": "मुझे इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं है।",
+    "mr": "मला या प्रश्नाचे उत्तर देण्यासाठी पुरेशी माहिती नाही.",
+    "sa": "अस्य प्रश्नस्य उत्तरं दातुं मम समीपे पर्याप्ता सूचना नास्ति।",
+    "ta": "இந்தக் கேள்விக்கு பதிலளிக்க போதுமான தகவல் என்னிடம் இல்லை.",
+    "en": "I do not have enough information to answer this question.",
+}
+
+# Localized messages when input violates safety or contains prohibited content
+SAFETY_VIOLATION_MESSAGES = {
+    "hi": "यह अनुरोध हमारी सुरक्षा नीति के विरुद्ध है। कृपया उचित प्रश्न पूछें।",
+    "mr": "हा विनंती आमच्या सुरक्षा धोरणाचे उल्लंघन करतो. कृपया योग्य प्रश्न विचारा.",
+    "sa": "एषा प्रार्थना अस्माकं सुरक्षा नीतेः विरुद्धा अस्ति। कृपया उचितं प्रश्नं पृच्छन्तु।",
+    "ta": "இந்தக் கோரிக்கை எங்கள் பாதுகாப்புக் கொள்கைக்கு எதிரானது. தயவுசெய்து பொருத்தமான கேள்வியைக் கேட்கவும்.",
+    "en": "This request violates our safety policy. Please ask an appropriate question.",
+}
+
+# Localized messages when unsupported language is passed
+UNSUPPORTED_LANG_MESSAGES = {
+    "hi": "यह भाषा समर्थित नहीं है। कृपया हिंदी, मराठी, संस्कृत, तमिल या अंग्रेजी में पूछें।",
+    "mr": "ही भाषा समर्थित नाही. कृपया हिंदी, मराठी, संस्कृत, तमिळ किंवा इंग्रजीमध्ये विचारा.",
+    "sa": "एषा भाषा समन्विता नास्ति। कृपया संस्कृतम्, हिन्दी, मराठी, तमिळ् अथवा आङ्ग्लभाषायां पृच्छन्तु।",
+    "ta": "இந்த மொழி ஆதரிக்கப்படவில்லை. தயவுசெய்து தமிழ், இந்தி, மராத்தி, சமஸ்கிருதம் அல்லது ஆங்கிலத்தில் கேட்கவும்.",
+    "en": "This language is not supported. Please ask in Hindi, Marathi, Sanskrit, Tamil, or English.",
+}
+
+# Configurable blocked topics / keywords for custom refusal guardrail
+BLOCKED_TOPICS = [
+    "hack", "exploit", "password", "bypass security",
+    "bomb", "weapon", "kill", "suicide", "terror",
+]
 
 
 # ===========================================================================

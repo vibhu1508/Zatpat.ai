@@ -1,32 +1,46 @@
 # =============================================================================
-# Zatpat.ai .gitignore
+# Zatpat.ai .gitignore — Production Backend Distribution
 # =============================================================================
 
-# Python
+# Virtual Environment & Python Cache
 .venv/
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 *.egg-info/
 dist/
 build/
 
-# Environment & secrets
+# Environment Variables & Secrets
 .env
+.env.*
+!.env.example
 
-# Data files (large, downloaded at runtime)
+# Large Data & Datasets (loaded/indexed at runtime)
 data/
 *.parquet
+*.jsonl
 msmarco_xi_preview.json
 
-# IDE
+# Test suites & Local test scripts (Pure backend only)
+backend/tests/
+test_cli.py
+voice_client.py
+benchmark.py
+frontend/
+
+# Logs & Benchmark Artifacts
+*.log
+benchmark_results.json
+implementation_plan.md
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Operating System & IDE Files
+.DS_Store
+Thumbs.db
 .vscode/
 .idea/
 *.swp
 *.swo
-.DS_Store
-
-# Logs & artifacts
-*.log
-benchmark_results.json
-implementation_plan.md

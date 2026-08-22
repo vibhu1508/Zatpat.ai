@@ -32,5 +32,6 @@ pandas
 
 # Development & testing
 pytest
+pytest-asyncio
 ipykernel
 jupyter
