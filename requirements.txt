@@ -1,37 +1,25 @@
 # =============================================================================
-# Zatpat.ai Python Dependencies
+# Zatpat.ai Production Dependencies (Optimized for <512MB RAM)
 # =============================================================================
 
-# Dataset download & parsing
-datasets
+# Dataset & HuggingFace
 huggingface_hub
-pyarrow
 requests
 
-# Vector embeddings
+# Embeddings (PyTorch CPU / Sentence-Transformers)
 sentence-transformers
 numpy
 
-# Redis Stack client (vector search + session memory)
+# Redis Stack client (Vector search + Session memory)
 redis[hiredis]
 
 # LLM client (Ollama)
 ollama
 
-# Web server
+# Web server & WebSockets
 fastapi
 uvicorn[standard]
 websockets
 
-# Speech-to-Text (Sarvam AI)
-# (Uses websockets package above)
-
 # Environment & utilities
 python-dotenv
-pandas
-
-# Development & testing
-pytest
-pytest-asyncio
-ipykernel
-jupyter

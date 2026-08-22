@@ -63,6 +63,7 @@ LANG_PARQUET_MAP = {
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 REDIS_INDEX_NAME = "idx:msmarco_passages"       # FT index name
 REDIS_DOC_PREFIX = "doc:msmarco:"                # Hash key prefix
 

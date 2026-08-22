@@ -66,39 +66,43 @@ from backend.stt import transcribe_audio, STTResult
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Pre-warm connections and models on server boot."""
+    """Pre-warm connections and models on server boot without blocking port binding."""
     print("\n" + "=" * 60)
     print("  🚀 Starting Zatpat.ai RAG Server...")
     print("=" * 60)
-    
-    # 1. Warm up Redis connection
-    try:
-        r = get_redis()
-        r.ping()
-        print("  ✔ Redis Stack: Connected (idx:msmarco_passages ready)")
-    except Exception as e:
-        print(f"  ⚠ Redis Connection Warning: {e}")
 
-    # 2. Pre-warm Sentence Transformer Embedder & Redis HNSW query graph
-    try:
-        from backend.retrieval import search
-        get_embedder()
-        embed_text("warmup search query")
-        search("warmup search query", lang="hi", top_k=2)
-        print("  ✔ Embedding & HNSW Index: Warm in RAM (Sub-30ms ready)")
-    except Exception as e:
-        print(f"  ⚠ Embedder Warmup Warning: {e}")
+    async def _async_warmup():
+        # 1. Warm up Redis connection
+        try:
+            r = get_redis()
+            r.ping()
+            print("  ✔ Redis Stack: Connected")
+        except Exception as e:
+            print(f"  ⚠ Redis Connection: {e}")
 
-    # 3. Pre-warm Sarvam STT HTTP/2 connection pool
-    try:
-        from backend.stt import get_stt_http_client
-        get_stt_http_client()
-        print("  ✔ Sarvam STT: HTTP/2 Connection Pool Active")
-    except Exception as e:
-        print(f"  ⚠ STT Warmup Warning: {e}")
+        # 2. Pre-warm Sentence Transformer Embedder & Redis HNSW query graph
+        try:
+            from backend.retrieval import search
+            get_embedder()
+            embed_text("warmup")
+            search("warmup", lang="hi", top_k=1)
+            print("  ✔ Embedding & Index: Warm in RAM")
+        except Exception as e:
+            print(f"  ⚠ Warmup note: {e}")
+
+        # 3. Pre-warm Sarvam STT HTTP/2 connection pool
+        try:
+            from backend.stt import get_stt_http_client
+            get_stt_http_client()
+            print("  ✔ Sarvam STT: HTTP/2 Pool Active")
+        except Exception as e:
+            print(f"  ⚠ STT note: {e}")
+
+    # Launch background warmup so uvicorn binds port instantly for Render health checks
+    asyncio.create_task(_async_warmup())
 
     print("=" * 60)
-    print("  ⚡ Server Ready for Sub-200ms Voice & Text Queries")
+    print("  ⚡ Server Ready & Port Bound")
     print("=" * 60 + "\n")
     yield
     print("\n  🛑 Shutting down Zatpat.ai Server...")

@@ -32,6 +32,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from backend.config import (
     REDIS_HOST,
     REDIS_PORT,
+    REDIS_PASSWORD,
     REDIS_INDEX_NAME,
     REDIS_DOC_PREFIX,
     REDIS_HNSW_M,
@@ -66,6 +67,7 @@ def get_redis():
         _redis_client = redis.Redis(
             host=REDIS_HOST,
             port=REDIS_PORT,
+            password=REDIS_PASSWORD,
             decode_responses=False,  # We need bytes for vector fields
             socket_keepalive=True,
             socket_timeout=2.0,
@@ -78,13 +80,15 @@ def get_redis():
 
 def get_embedder():
     """
-    Lazy-load the SentenceTransformer embedding model.
-    First call downloads/loads weights (~90MB); subsequent calls are instant.
+    Lazy-load the SentenceTransformer embedding model with minimal RAM footprint (<120MB).
     """
     global _embed_model
     if _embed_model is None:
+        import torch
+        # Cap CPU threads to prevent memory explosion on cloud containers
+        torch.set_num_threads(1)
         from sentence_transformers import SentenceTransformer
-        _embed_model = SentenceTransformer(EMBEDDING_MODEL)
+        _embed_model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
     return _embed_model
 
 
