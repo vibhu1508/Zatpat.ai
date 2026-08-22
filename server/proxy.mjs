@@ -30,7 +30,16 @@ const server = http.createServer((req, res) => {
   // Render's health check hits the service over plain HTTP; without this it
   // would be marked unhealthy and restarted in a loop.
   if (req.url === '/health' || req.url === '/') {
-    res.writeHead(200, { 'content-type': 'application/json' });
+    // CORS matters here: the browser pings this from the app's origin to wake a
+    // sleeping instance before retrying the WebSocket. Without the header the
+    // fetch is blocked and the wake never happens.
+    const origin = req.headers.origin;
+    const allow = !ALLOWED.length || (origin && ALLOWED.includes(origin));
+    res.writeHead(200, {
+      'content-type': 'application/json',
+      'access-control-allow-origin': allow && origin ? origin : '*',
+      'cache-control': 'no-store',
+    });
     res.end(JSON.stringify({ ok: true, upstream: ORIGIN }));
     return;
   }

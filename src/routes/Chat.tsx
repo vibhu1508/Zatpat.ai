@@ -229,6 +229,7 @@ export default function Chat() {
       languageCode: 'auto',
       streamType: 'fast',
       onPartial: (text) => setInterim(text),
+      onWaking: () => setVoiceError('Waking the speech service… this can take up to a minute on first use.'),
       onSpeechEnd: () => {
         speechEndAt.current = performance.now();
       },

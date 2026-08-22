@@ -19,6 +19,8 @@
 export type SarvamMode = 'translate' | 'transcribe' | 'verbatim' | 'translit' | 'codemix';
 
 export interface SarvamOptions {
+  /** Called while a sleeping proxy is being woken, so the UI can say so. */
+  onWaking?: () => void;
   /** Base websocket URL. Defaults to the dev proxy, which injects the key. */
   url?: string;
   mode?: SarvamMode;
@@ -48,8 +50,24 @@ export const SAMPLE_RATE = 16000;
  * deploys the static site and the proxy as two origins — set
  * VITE_SARVAM_WS_URL to its base, e.g. wss://host.onrender.com/sarvam.
  */
-const BASE = import.meta.env.VITE_SARVAM_WS_URL?.replace(/\/$/, '') ?? '/sarvam';
+function normaliseBase(raw: string | undefined): string {
+  if (!raw) return '/sarvam';
+  const trimmed = raw.trim().replace(/\/$/, '');
+  // A pasted proxy URL is far more often https:// than wss://. Left alone it
+  // fails the ws:// test below and gets resolved against the app's own origin,
+  // producing a nonsense URL and an error that says nothing useful.
+  if (trimmed.startsWith('https://')) return `wss://${trimmed.slice('https://'.length)}`;
+  if (trimmed.startsWith('http://')) return `ws://${trimmed.slice('http://'.length)}`;
+  return trimmed;
+}
+
+const BASE = normaliseBase(import.meta.env.VITE_SARVAM_WS_URL);
 const DEFAULT_URL = `${BASE}/speech-to-text-realtime/ws`;
+
+/** Health endpoint of a cross-origin proxy, used to wake a sleeping host. */
+const HEALTH_URL = /^wss?:\/\//.test(BASE)
+  ? `${BASE.replace(/^ws/, 'http').replace(/\/sarvam$/, '')}/health`
+  : null;
 
 type ServerEvent =
   | { event: 'session.begin'; request_id: string; config: unknown }
@@ -73,6 +91,8 @@ export class SarvamRealtime {
   private opts: SarvamOptions;
   private ping = 0;
   private closing = false;
+  /** One wake-and-retry per connect, so a genuine failure still surfaces. */
+  private retried = false;
   /** Frames captured before the socket finished opening. */
   private pending: string[] = [];
 
@@ -88,6 +108,11 @@ export class SarvamRealtime {
   connect(languageCode?: string) {
     if (this.ws) return;
     this.closing = false;
+    this.retried = false;
+    this.open(languageCode);
+  }
+
+  private open(languageCode?: string) {
 
     const base = this.opts.url ?? DEFAULT_URL;
     const url = base.startsWith('ws')
@@ -131,7 +156,27 @@ export class SarvamRealtime {
     };
 
     ws.onerror = () => {
-      if (!this.closing) this.opts.onError?.('Realtime connection failed.', true);
+      if (this.closing) return;
+      // Free hosting tiers sleep when idle and take 30-60 s to wake; the first
+      // upgrade attempt is refused while that happens. Wake the host over plain
+      // HTTP — that request blocks until it is up — then try once more.
+      if (HEALTH_URL && !this.retried) {
+        this.retried = true;
+        this.ws = null;
+        this.opts.onWaking?.();
+        fetch(HEALTH_URL, { mode: 'cors' })
+          .catch(() => {})
+          .then(() => {
+            if (!this.closing) this.open(languageCode);
+          });
+        return;
+      }
+      this.opts.onError?.(
+        HEALTH_URL
+          ? 'Could not reach the speech service. It may still be starting up — try again.'
+          : 'Realtime connection failed.',
+        true,
+      );
     };
 
     ws.onclose = () => {
