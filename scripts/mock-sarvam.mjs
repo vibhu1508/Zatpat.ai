@@ -59,6 +59,7 @@ wss.on('connection', (ws, req) => {
   let started = false;
   let finalised = false;
   let badFrames = 0;
+  let binaryFrames = 0;
 
   const finalise = () => {
     if (finalised) return;
@@ -71,10 +72,20 @@ wss.on('connection', (ws, req) => {
       language: LANG,
       language_confidence: '0.97',
     });
-    console.log(`  final sent — ${frames} frames, ${bytes} bytes, ${badFrames} malformed`);
+    console.log(
+      `  final sent — ${frames} frames, ${bytes} bytes, ${badFrames} malformed` +
+        (binaryFrames ? `, ${binaryFrames} BINARY (must be text — these are ignored)` : ''),
+    );
   };
 
-  ws.on('message', (raw) => {
+  ws.on('message', (raw, isBinary) => {
+    // Sarvam's protocol is JSON text. A proxy that forwards Buffers naively
+    // turns these into binary frames, which the real API silently ignores —
+    // so this must be an error here, not tolerated by calling toString().
+    if (isBinary) {
+      binaryFrames++;
+      return;
+    }
     let msg;
     try {
       msg = JSON.parse(raw.toString());
@@ -112,5 +123,10 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  ws.on('close', () => console.log(`  closed — ${frames} frames, ${bytes} bytes`));
+  ws.on('close', () =>
+    console.log(
+      `  closed — ${frames} frames, ${bytes} bytes` +
+        (binaryFrames ? `, ${binaryFrames} BINARY frames rejected` : ''),
+    ),
+  );
 });

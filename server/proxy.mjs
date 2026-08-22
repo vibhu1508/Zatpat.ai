@@ -75,15 +75,29 @@ function pipe(browser, path) {
   const pending = [];
   let open = false;
 
+  /**
+   * Forward a frame preserving its type.
+   *
+   * `ws` delivers every payload as a Buffer, and `send(Buffer)` emits a BINARY
+   * frame by default. Sarvam's protocol is JSON text, so forwarding naively
+   * turns every `audio_input` message into a binary frame that the API ignores
+   * — the socket opens, `session.begin` arrives, and nothing is ever
+   * transcribed. The mock server did not catch this because it calls
+   * `toString()` on whatever arrives.
+   */
+  const forward = (sock, data, isBinary) => {
+    if (sock.readyState === WebSocket.OPEN) sock.send(data, { binary: isBinary });
+  };
+
   upstream.on('open', () => {
     open = true;
-    for (const m of pending.splice(0)) upstream.send(m);
+    for (const [data, isBinary] of pending.splice(0)) forward(upstream, data, isBinary);
   });
 
-  browser.on('message', (m) => (open ? upstream.send(m) : pending.push(m)));
-  upstream.on('message', (m) => {
-    if (browser.readyState === WebSocket.OPEN) browser.send(m);
-  });
+  browser.on('message', (m, isBinary) =>
+    open ? forward(upstream, m, isBinary) : pending.push([m, isBinary]),
+  );
+  upstream.on('message', (m, isBinary) => forward(browser, m, isBinary));
 
   const shut = (a, code, reason) => {
     // Codes outside 1000-4999 cannot be sent on the wire.

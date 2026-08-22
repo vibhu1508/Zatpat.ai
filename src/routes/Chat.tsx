@@ -222,6 +222,7 @@ export default function Chat() {
       localVad: false,
       onState: setMicState,
       onPcm: (frame) => sarvam.current?.pushPcm(frame),
+      onFault: (message) => setVoiceError(message),
     });
 
     const sr = new SarvamRealtime({

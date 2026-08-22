@@ -24,6 +24,13 @@ export interface MicOptions {
    */
   onPcm?: (frame: ArrayBuffer) => void;
   /**
+   * Something in the capture chain failed in a way the user must be told about.
+   * Audio problems are otherwise invisible: the socket connects, the sphere
+   * reacts, and nothing is ever transcribed — which looks like a broken model
+   * rather than a broken microphone.
+   */
+  onFault?: (message: string) => void;
+  /**
    * Use the local energy gate to end the turn. Off when Sarvam is driving,
    * since its server-side VAD is better and already segments the utterance.
    */
@@ -35,6 +42,8 @@ export class Mic {
   private stream: MediaStream | null = null;
   private analyser: AnalyserNode | null = null;
   private worklet: AudioWorkletNode | null = null;
+  private framesSent = 0;
+  private frameWatch = 0;
   private freq = new Uint8Array(new ArrayBuffer(0));
   private time = new Float32Array(new ArrayBuffer(0));
   private raf = 0;
@@ -79,7 +88,18 @@ export class Mic {
     // Constructed at 16 kHz so the browser resamples the capture for us —
     // Sarvam wants linear16/16000 and manual downsampling would only add
     // latency and error.
-    this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    try {
+      this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    } catch {
+      // Some browsers refuse a forced sample rate. Falling back keeps the app
+      // working, but the audio then needs resampling before it is streamed.
+      this.ctx = new AudioContext();
+    }
+    if (this.ctx.sampleRate !== SAMPLE_RATE && this.opts.onPcm) {
+      this.opts.onFault?.(
+        `Microphone is running at ${this.ctx.sampleRate} Hz, not ${SAMPLE_RATE} Hz. Speech may not transcribe.`,
+      );
+    }
     await this.ctx.resume();
     const src = this.ctx.createMediaStreamSource(this.stream);
 
@@ -91,13 +111,20 @@ export class Mic {
           numberOfOutputs: 0,
           processorOptions: { frame: 320 },
         });
-        node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => this.opts.onPcm?.(e.data);
+        node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+          this.framesSent++;
+          this.opts.onPcm?.(e.data);
+        };
         src.connect(node);
         this.worklet = node;
-      } catch {
-        // No worklet support: the sphere and the local gate still work, but
-        // there is nothing to stream.
+      } catch (err) {
+        // Without the worklet nothing is streamed, so nothing is transcribed.
+        // The sphere still animates off the analyser, which makes this look
+        // like a model failure unless it is reported.
         this.opts.onState?.('unsupported');
+        this.opts.onFault?.(
+          `Audio capture unavailable (${err instanceof Error ? err.message : 'worklet failed to load'}). Speech cannot be sent.`,
+        );
       }
     }
 
@@ -115,8 +142,19 @@ export class Mic {
 
     this.hasSpoken = false;
     this.silenceSince = 0;
+    this.framesSent = 0;
     field.speaker = 'user';
     this.setState('live');
+
+    // If audio is being captured but no frames reach the socket, say so rather
+    // than sit silently producing no transcript.
+    if (this.opts.onPcm) {
+      this.frameWatch = window.setTimeout(() => {
+        if (this.framesSent === 0) {
+          this.opts.onFault?.('Microphone is open but no audio is being captured.');
+        }
+      }, 2500);
+    }
     this.loop();
   }
 
@@ -166,6 +204,8 @@ export class Mic {
   };
 
   stop() {
+    window.clearTimeout(this.frameWatch);
+    this.frameWatch = 0;
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.analyser = null;
