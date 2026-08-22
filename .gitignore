@@ -1,0 +1,32 @@
+# =============================================================================
+# Zatpat.ai .gitignore
+# =============================================================================
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment & secrets
+.env
+
+# Data files (large, downloaded at runtime)
+data/
+*.parquet
+msmarco_xi_preview.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs & artifacts
+*.log
+benchmark_results.json
+implementation_plan.md

@@ -1,0 +1,36 @@
+# =============================================================================
+# Zatpat.ai Python Dependencies
+# =============================================================================
+
+# Dataset download & parsing
+datasets
+huggingface_hub
+pyarrow
+requests
+
+# Vector embeddings
+sentence-transformers
+numpy
+
+# Redis Stack client (vector search + session memory)
+redis[hiredis]
+
+# LLM client (Ollama)
+ollama
+
+# Web server
+fastapi
+uvicorn[standard]
+websockets
+
+# Speech-to-Text (Sarvam AI)
+# (Uses websockets package above)
+
+# Environment & utilities
+python-dotenv
+pandas
+
+# Development & testing
+pytest
+ipykernel
+jupyter
