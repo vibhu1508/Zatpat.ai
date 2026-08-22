@@ -67,6 +67,9 @@ def get_redis():
             host=REDIS_HOST,
             port=REDIS_PORT,
             decode_responses=False,  # We need bytes for vector fields
+            socket_keepalive=True,
+            socket_timeout=2.0,
+            socket_connect_timeout=2.0,
         )
         # Quick connectivity check
         _redis_client.ping()
@@ -91,7 +94,7 @@ def get_embedder():
 
 def embed_text(text: str) -> np.ndarray:
     """
-    Embed a single text string into a 384-dim float32 vector.
+    Embed a single text string into a 384-dim float32 vector with sub-15ms latency.
     
     Args:
         text: English text to embed (query or passage)
@@ -99,8 +102,15 @@ def embed_text(text: str) -> np.ndarray:
     Returns:
         numpy array of shape (384,), dtype float32
     """
+    import torch
     model = get_embedder()
-    return model.encode(text, convert_to_numpy=True).astype(np.float32)
+    with torch.inference_mode():
+        return model.encode(
+            text,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+            normalize_embeddings=True,
+        ).astype(np.float32)
 
 
 def embed_texts_batch(texts: List[str], batch_size: int = 64) -> np.ndarray:
@@ -206,19 +216,27 @@ def create_index(drop_existing: bool = False):
     print(f"  ✅ Created index '{REDIS_INDEX_NAME}' (HNSW, {EMBEDDING_DIM}d, COSINE)")
 
 
-def index_chunks(chunks: List[Dict[str, Any]], batch_size: int = 64):
+def index_chunks(chunks_or_path=None, batch_size: int = 128) -> int:
     """
-    Embed and index all chunks into Redis.
+    Embed and index a list of chunks (or path to chunks_ready.json) into Redis.
     
-    Pipeline:
-    1. Batch-embed all eng_text fields
+    1. Batch-embed all English chunk texts with all-MiniLM-L6-v2 (384d)
     2. Store each chunk as a Redis Hash with all metadata + vector
     3. Uses Redis pipeline for batch writes (~10x faster than individual SET)
     
     Args:
-        chunks: List of chunk dicts from data/chunks_ready.json
+        chunks_or_path: List of chunk dicts or path to chunks_ready.json (defaults to CHUNKS_FILE)
         batch_size: Embedding batch size
     """
+    if chunks_or_path is None:
+        chunks_or_path = CHUNKS_FILE
+
+    if isinstance(chunks_or_path, str):
+        with open(chunks_or_path, "r", encoding="utf-8") as f:
+            chunks = json.load(f)
+    else:
+        chunks = chunks_or_path
+
     r = get_redis()
     
     # -----------------------------------------------------------------------

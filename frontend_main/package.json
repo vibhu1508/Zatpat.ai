@@ -1,0 +1,36 @@
+{
+  "name": "zatpat-ai",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "corpus": "python3 scripts/build-corpus.py --queries 1500 --data ./data",
+    "eval": "./scripts/run-eval.sh scripts/eval-retrieval.ts",
+    "mock-sarvam": "node scripts/mock-sarvam.mjs",
+    "eval:dense": "node scripts/eval-dense.mjs",
+    "eval:guard": "./scripts/run-eval.sh scripts/eval-guard.ts",
+    "eval:gate": "./scripts/run-eval.sh scripts/eval-gate.ts",
+    "eval:multiturn": "./scripts/run-eval.sh scripts/eval-multiturn.ts",
+    "eval:transcript": "./scripts/run-eval.sh scripts/eval-transcript.ts"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.2",
+    "three": "^0.177.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.6",
+    "@types/three": "^0.177.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^4.5.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "ws": "^8.21.3"
+  }
+}

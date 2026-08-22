@@ -203,7 +203,7 @@ async def transcribe_audio_rest(
     }
     data = {
         "model": "saaras:v2.5",
-        "mode": "translate",
+        "mode": "transcribe",
         "prompt": "",
     }
 
@@ -238,17 +238,17 @@ async def transcribe_audio_rest(
 
 def transcribe_mock(
     sample_query: str = "what is a corporation?",
-    lang: str = "mr",
+    lang: str = "hi",
 ) -> STTResult:
     """
     Simulates instantaneous sub-40ms STT translation for local offline testing.
     """
     native_map = {
-        "mr": "कॉर्पोरेशन काय आहे?",
-        "hi": "कॉर्पोरेशन क्या है?",
-        "sa": "निगमः किम् अस्ति?",
-        "ta": "கார்ப்பரேஷன் என்றால் என்ன?",
-        "en": "what is a corporation?",
+        "mr": "इंडोनेशियामध्ये किती भाषा वापरल्या जातात?",
+        "hi": "इंडोनेशिया में कितने भाषाएँ उपयोग होते हैं?",
+        "sa": "इण्डोनेशियादेशे कति भाषाः प्रयुज्यन्ते?",
+        "ta": "இந்தோனேசியாவில் எத்தனை மொழிகள் பயன்படுத்தப்படுகின்றன?",
+        "en": "How many languages are used in Indonesia?",
     }
     return STTResult(
         detected_lang=lang,

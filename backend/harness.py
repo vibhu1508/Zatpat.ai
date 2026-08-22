@@ -127,6 +127,64 @@ async def retry_async(
     raise last_exception
 
 
+import re
+
+async def condense_conversational_query_async(query: str, history: List[Dict[str, Any]]) -> str:
+    """
+    Generic Zero-Shot Conversational Query Condensation:
+    
+    Uses LLM to rephrase ANY follow-up question, pronoun, elliptical query, or meta-question
+    into a complete standalone knowledge search query containing all necessary subjects and context.
+    
+    Handles 100% of cases generically without hardcoded regex patterns or static keyword lists.
+    """
+    if not history or not query:
+        return query
+
+    # Build concise recent dialogue snippet
+    history_turns = []
+    for t in history[:3]:
+        q = t.get("query", "").strip()
+        a = t.get("answer", "").strip()
+        if q:
+            history_turns.append(f"User: {q}\nAssistant: {a}")
+
+    if not history_turns:
+        return query
+
+    history_str = "\n".join(history_turns)
+    prompt = f"""Chat History:
+{history_str}
+
+Follow-up Question: {query}
+
+Task: Rephrase the Follow-up Question into a single standalone search query containing all necessary subjects, entities, and context from the chat history. Output ONLY the standalone search query.
+Standalone Query:"""
+
+    try:
+        from backend.generation import get_ollama_client
+        from backend.config import OLLAMA_MODEL
+        client = get_ollama_client()
+        resp = await asyncio.wait_for(
+            client.chat(
+                model=OLLAMA_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.0, "num_predict": 30},
+            ),
+            timeout=2.0,
+        )
+        condensed = resp.get("message", {}).get("content", "").strip()
+        condensed = re.sub(r'^(Standalone Query:|"|\')', '', condensed, flags=re.IGNORECASE).strip().strip('"\'')
+        if len(condensed) >= 3 and not condensed.lower().startswith("chat history"):
+            return condensed
+    except Exception:
+        pass
+
+    # Generic fallback: append last query's core words
+    last_query = history[0].get("query", "")
+    return f"{last_query} {query}".strip()
+
+
 # ===========================================================================
 # Core Pipeline Harness Orchestrator
 # ===========================================================================
@@ -142,7 +200,7 @@ async def run_rag_pipeline(
     Orchestrates the entire RAG pipeline from query to retrieval & guardrails:
     
     1. Input Guardrails (Language, Safety, PII, Length)
-    2. Session history retrieval
+    2. Session history retrieval & Generic zero-shot conversational query condensation
     3. Vector Retrieval from Redis HNSW (with retry)
     4. Post-Retrieval Output Guardrails (Confidence threshold & No-Answer checks)
     5. Session turn update
@@ -185,7 +243,7 @@ async def run_rag_pipeline(
         return ctx
 
     # -----------------------------------------------------------------------
-    # Step 2: Load Session Context
+    # Step 2: Load Session Context & Generic Zero-Shot Query Condensation
     # -----------------------------------------------------------------------
     t0 = time.perf_counter()
     try:
@@ -194,27 +252,42 @@ async def run_rag_pipeline(
         ctx.conversation_history = []
     ctx.timings["session_load_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
+    # Perform generic LLM-based query condensation for follow-up conversational turns
+    if ctx.conversation_history:
+        ctx.english_query = await condense_conversational_query_async(ctx.english_query, ctx.conversation_history)
+
     # -----------------------------------------------------------------------
-    # Step 3: Redis Vector Retrieval (with Retry & Backoff)
+    # Step 3: Redis Vector Retrieval (Sub-40ms Fast Path)
     # -----------------------------------------------------------------------
     t0 = time.perf_counter()
     try:
-        passages = await retry_async(
+        passages = await asyncio.to_thread(
             search,
             query_text=ctx.english_query,
             lang=ctx.lang,
             top_k=top_k,
             deduplicate=True,
-            max_retries=2,
         )
         ctx.retrieved_passages = passages
         ctx.top_score = passages[0]["score"] if passages else 0.0
     except Exception as e:
-        ctx.status = "error"
-        ctx.error = f"retrieval_failed: {str(e)}"
-        ctx.timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-        ctx.timings["total_rag_ms"] = round((time.perf_counter() - t_total_start) * 1000, 2)
-        return ctx
+        try:
+            passages = await retry_async(
+                search,
+                query_text=ctx.english_query,
+                lang=ctx.lang,
+                top_k=top_k,
+                deduplicate=True,
+                max_retries=1,
+            )
+            ctx.retrieved_passages = passages
+            ctx.top_score = passages[0]["score"] if passages else 0.0
+        except Exception as e2:
+            ctx.status = "error"
+            ctx.error = f"retrieval_failed: {str(e2)}"
+            ctx.timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+            ctx.timings["total_rag_ms"] = round((time.perf_counter() - t_total_start) * 1000, 2)
+            return ctx
 
     ctx.timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 

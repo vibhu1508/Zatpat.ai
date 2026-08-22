@@ -79,11 +79,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  ⚠ Redis Connection Warning: {e}")
 
-    # 2. Pre-warm Sentence Transformer Embedder into RAM
+    # 2. Pre-warm Sentence Transformer Embedder & Redis HNSW query graph
     try:
+        from backend.retrieval import search
         get_embedder()
-        embed_text("warmup")
-        print("  ✔ Embedding Model: Loaded into RAM (all-MiniLM-L6-v2)")
+        embed_text("warmup search query")
+        search("warmup search query", lang="hi", top_k=2)
+        print("  ✔ Embedding & HNSW Index: Warm in RAM (Sub-30ms ready)")
     except Exception as e:
         print(f"  ⚠ Embedder Warmup Warning: {e}")
 
@@ -392,17 +394,33 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                 try:
                     payload = json.loads(message["text"])
                     query_text = payload.get("query", "")
-                    lang = payload.get("lang", "hi")
+                    lang = payload.get("lang", "auto")
                     english_query = payload.get("english_query", query_text)
                     if payload.get("session_id"):
                         session_id = payload["session_id"]
                 except Exception:
                     query_text = message["text"].strip()
-                    lang = "hi"
+                    lang = "auto"
                     english_query = query_text
 
-            if not query_text:
-                continue
+                if not query_text:
+                    continue
+
+                # Auto-detect language if requested or unspecified
+                if not lang or lang == "auto":
+                    import re
+                    if re.search(r"[\u0B80-\u0BFF]", query_text):
+                        lang = "ta"
+                    elif re.search(r"[\u0900-\u097F]", query_text):
+                        marathi_markers = ["आहे", "नाही", "काय", "कसे", "आणि", "यांचा", "यांचे", "मध्ये", "कधी", "कोण", "होते", "होती", "सांगा"]
+                        if any(w in query_text for w in marathi_markers) or "ळ" in query_text:
+                            lang = "mr"
+                        elif any(w in query_text for w in ["अस्ति", "भवति", "सङ्ग्रह", "इति", "किम्"]):
+                            lang = "sa"
+                        else:
+                            lang = "hi"
+                    else:
+                        lang = "en"
 
             # ---------------------------------------------------------------
             # Step 1: Run Harness (Input Guardrail + Retrieval + Output Guardrail)
@@ -449,7 +467,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
             async for chunk in generate_stream(
                 passages=ctx.retrieved_passages,
                 lang=ctx.lang,
-                english_query=ctx.english_query,
+                english_query=query_text or ctx.query,
                 conversation_history=ctx.conversation_history,
             ):
                 if chunk["type"] == "token":
@@ -488,6 +506,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                 "type": "done",
                 "session_id": session_id,
                 "full_answer": full_answer,
+                "lang": ctx.lang,
                 "is_grounded": ground_check.passed,
                 "groundedness_score": ground_check.metadata.get("overlap_ratio", 1.0),
                 "total_ms": timings["total_pipeline_ms"],

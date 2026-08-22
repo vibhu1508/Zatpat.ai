@@ -46,24 +46,23 @@ from backend.guardrails import validate_groundedness, GuardrailResult
 # System & User Prompt Templates
 # ===========================================================================
 
-# Strict system instructions enforcing language and extraction-only behavior
+# Strict system instructions enforcing native script and complete sentences
 SYSTEM_PROMPT_TEMPLATE = """You are Zatpat.ai, a multilingual question-answering assistant.
 
 CRITICAL INSTRUCTIONS:
-1. Target Language: Output ONLY in {language_name} ({language_code}). Do NOT use any English or other languages unless the target is English.
-2. Concise Extraction: Provide ONLY the direct, relevant answer to the question using the provided context. Do NOT copy unnecessary background sentences.
-3. Length Limit: Keep the answer concise (1 to 2 sentences maximum).
-4. No Extrapolation: Do NOT fabricate details or use outside knowledge. If the context does not contain the answer, say: "{abstain_message}".
-5. Direct Response: Output ONLY the final answer text. Do NOT include greetings, prefixes, notes, or explanations."""
+1. Target Language & Script: Output ONLY in {language_name} ({language_code}) using its proper native script (e.g. Devanagari script for Hindi/Marathi/Sanskrit, Tamil script for Tamil).
+2. Complete Sentences: ALWAYS provide the answer as a complete, grammatically correct, natural sentence in {language_name}. Even for numerical values, counts, dates, names, or short facts, NEVER output isolated numbers or sentence fragments alone — always formulate a complete sentence that directly answers the question (e.g., write "इंडोनेशिया में 700 से अधिक भाषाएँ बोली जाती हैं।" instead of just "700").
+3. Strictly Grounded: Answer strictly and faithfully using only facts from the provided context. Keep the response to 1 to 2 complete sentences.
+4. Direct Response: Output ONLY the complete answer sentence in {language_name}. Do NOT include greetings, prefixes (like "Answer:"), markdown quotes, or conversational filler."""
 
-USER_PROMPT_TEMPLATE = """Context (in {language_name}):
+USER_PROMPT_TEMPLATE = """Context:
 \"\"\"
 {context_passages}
 \"\"\"
 
-Question (translated to English): {english_query}
+Question: {english_query}
 
-Extract the direct answer in {language_name}:"""
+Provide the answer as a complete, natural sentence in {language_name}:"""
 
 
 # ===========================================================================
@@ -102,13 +101,23 @@ def build_prompts(
     lang_name = LANG_NAMES.get(norm_lang, "English")
     abstain_msg = ABSTAIN_MESSAGES.get(norm_lang, ABSTAIN_MESSAGES["en"])
 
-    # Extract native text (or parent native text for rich context)
+    # Extract native text (prioritizing the top matching passage)
     context_chunks = []
-    for p in passages[:3]:  # Top 3 passages are sufficient
-        # Prefer parent passage if available, else chunk text
-        txt = p.get("parent_native_text") or p.get("native_text") or p.get("eng_text") or ""
-        if txt.strip() and txt.strip() not in context_chunks:
-            context_chunks.append(txt.strip())
+    if passages:
+        top_p = passages[0]
+        top_txt = top_p.get("parent_native_text") or top_p.get("native_text") or top_p.get("eng_text") or ""
+        top_ref = top_p.get("native_answer", "")
+        
+        primary_chunk = f"[Primary Context]\n{top_txt.strip()}"
+        if top_ref and top_ref.strip() and norm_lang != "en":
+            primary_chunk += f"\n(Reference Answer in {lang_name}: {top_ref.strip()})"
+        context_chunks.append(primary_chunk)
+
+        # Append secondary passage if available and sufficiently different
+        for p in passages[1:2]:
+            sec_txt = p.get("native_text") or p.get("eng_text") or ""
+            if sec_txt.strip() and sec_txt.strip() not in top_txt:
+                context_chunks.append(f"[Secondary Context]\n{sec_txt.strip()[:200]}")
 
     context_str = "\n\n".join(context_chunks) if context_chunks else "No context available."
 
@@ -126,12 +135,14 @@ def build_prompts(
 
     messages = [{"role": "system", "content": system_prompt}]
 
-    # Optionally inject last conversation turn for conversational flow
+    # Inject conversation history into chat messages
     if conversation_history:
-        # Include most recent turn if available
-        last_turn = conversation_history[0]
-        messages.append({"role": "user", "content": f"Previous Question: {last_turn.get('query', '')}"})
-        messages.append({"role": "assistant", "content": last_turn.get('answer', '')})
+        for turn in reversed(conversation_history[:3]):
+            q = turn.get('query', '').strip()
+            a = turn.get('answer', '').strip()
+            if q and a:
+                messages.append({"role": "user", "content": q})
+                messages.append({"role": "assistant", "content": a})
 
     messages.append({"role": "user", "content": user_prompt})
     return messages

@@ -192,6 +192,63 @@ def extract_documents_from_preview(preview_data: dict, target_langs: list) -> li
                     "passage_index": passage_idx,
                 }
 
+def extract_documents_from_corpus_json(corpus_data: dict, target_langs: list) -> tuple:
+    """
+    Extracts index-ready documents from structured data/corpus.json format.
+    Handles gold passage identification and all 4 native language mappings.
+    """
+    documents = []
+    stats = {
+        "total_records_scanned": 0,
+        "skipped_no_answer": 0,
+        "skipped_no_selected": 0,
+        "documents_created": 0,
+        "per_lang": defaultdict(lambda: defaultdict(int)),
+    }
+
+    entries = corpus_data.get("entries", [])
+    for entry in entries:
+        stats["total_records_scanned"] += 1
+        query_id = entry.get("id", 0)
+        query_type = entry.get("type", "DESCRIPTION")
+        eng_query = entry.get("engQuery", "").strip()
+        eng_answer = entry.get("engAnswer", "").strip()
+        passages = entry.get("passages", [])
+
+        # Find gold passage(s) (is_selected == true)
+        gold_passages = [p for p in passages if p.get("gold")]
+        if not gold_passages:
+            gold_passages = [passages[0]] if passages else []
+
+        if not gold_passages:
+            stats["skipped_no_selected"] += 1
+            continue
+
+        native_dict = entry.get("native", {})
+
+        for p_idx, p in enumerate(gold_passages):
+            eng_passage = p.get("text", "").strip()
+            doc_id_raw = p.get("docId", f"{query_id}_{p_idx}")
+
+            for lang in target_langs:
+                lang_data = native_dict.get(lang, {})
+                native_query = lang_data.get("query", eng_query).strip()
+                native_answer = lang_data.get("answer", eng_answer).strip()
+
+                doc_id = f"{lang}_{doc_id_raw}"
+                doc = {
+                    "doc_id": doc_id,
+                    "lang": lang,
+                    "query_id": int(query_id),
+                    "query_type": query_type,
+                    "eng_query": eng_query,
+                    "native_query": native_query,
+                    "eng_passage": eng_passage,
+                    "native_passage": eng_passage,
+                    "native_answer": native_answer,
+                    "eng_answer": eng_answer,
+                    "passage_index": p.get("idx", p_idx),
+                }
                 documents.append(doc)
                 stats["documents_created"] += 1
                 stats["per_lang"][lang][query_type] += 1
@@ -273,27 +330,33 @@ def run_ingestion(
     print(f"  Languages: {', '.join(target_langs)}")
 
     # -----------------------------------------------------------------------
-    # Step 1: Load preview data
+    # Step 1: Load input data
     # -----------------------------------------------------------------------
+    # Auto-detect data/corpus.json if preview_file doesn't exist
     if not os.path.exists(preview_file):
-        print(f"\n  ✖ Preview file not found: {preview_file}")
-        print("  Run `python dataset.py` first to generate it.")
-        sys.exit(1)
+        alt_corpus = os.path.join(PROJECT_ROOT, "data", "corpus.json")
+        if os.path.exists(alt_corpus):
+            preview_file = alt_corpus
+        else:
+            print(f"\n  ✖ Input file not found: {preview_file}")
+            sys.exit(1)
 
     with open(preview_file, "r", encoding="utf-8") as f:
-        preview_data = json.load(f)
-
-    available_langs = [l for l in target_langs if l in preview_data]
-    missing_langs = [l for l in target_langs if l not in preview_data]
-    if missing_langs:
-        print(f"\n  ⚠ Missing languages in preview: {missing_langs}")
-    print(f"  Available: {available_langs}")
+        input_data = json.load(f)
 
     # -----------------------------------------------------------------------
-    # Step 2: Extract documents
+    # Step 2: Extract documents (Detect schema: corpus.json vs preview.json)
     # -----------------------------------------------------------------------
     start_time = time.time()
-    documents, stats = extract_documents_from_preview(preview_data, available_langs)
+
+    if isinstance(input_data, dict) and "entries" in input_data:
+        print(f"  Schema:   data/corpus.json (Unified multi-entry format)")
+        documents, stats = extract_documents_from_corpus_json(input_data, target_langs)
+    else:
+        print(f"  Schema:   msmarco_xi_preview.json (Per-language map format)")
+        available_langs = [l for l in target_langs if l in input_data]
+        documents, stats = extract_documents_from_preview(input_data, available_langs)
+
     elapsed = time.time() - start_time
 
     # -----------------------------------------------------------------------
